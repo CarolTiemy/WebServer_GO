@@ -96,7 +96,7 @@
                 badge.textContent = 'online';
                 badge.className = 'badge online';
                 status.textContent = data.status.toUpperCase();
-                time.textContent = formatTempo(data.t);
+                time.textContent = data.t;
 
                 result.style.display = 'block';
                 body.textContent = JSON.stringify(data, null, 2);
@@ -142,7 +142,7 @@
                     `Original:    ${data.original} bytes\n` +
                     `Comprimido:  ${data.comprimido} bytes\n` +
                     `Compressão:  ${sign} ${Math.abs(ratio)}%\n` +
-                    `Tempo:       ${formatTempo(data.tempo)}\n\n` +
+                    `Tempo:       ${data.tempo}\n\n` +
                     `Raw: ${JSON.stringify(data)}`;
             } catch (err) {
                 result.style.display = 'block';
@@ -155,15 +155,6 @@
         function limpar() {
             document.getElementById('json-input').value = '';
             document.getElementById('process-result').style.display = 'none';
-        }
-
-        function formatTempo(raw) {
-            const ns = parseInt(raw);
-            if (isNaN(ns)) return raw;
-            if (ns < 1000) return ns + ' ns';
-            if (ns < 1000000) return (ns / 1000).toFixed(2) + ' µs';
-            if (ns < 1000000000) return (ns / 1000000).toFixed(2) + ' ms';
-            return (ns / 1000000000).toFixed(2) + ' s';
         }
 
         checkHealth();

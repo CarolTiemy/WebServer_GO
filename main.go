@@ -14,112 +14,85 @@ import (
 	kgzip "github.com/klauspost/compress/gzip"
 )
 
+//go:noescape
+//go:linkname nanotime runtime.nanotime
 func nanotime() int64
 
-var poolCompressores = sync.Pool{
-	New: func() any {
-		compressor, _ := kgzip.NewWriterLevel(io.Discard, kgzip.BestSpeed)
-		return compressor
-	},
-}
+var compressores = sync.Pool{New: func() any { w, _ := kgzip.NewWriterLevel(io.Discard, kgzip.BestSpeed); return w }}
+var buffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
-var poolBuffers = sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
-
-func preWarm() {
-	for i := 0; i < 16; i++ {
-		buf := poolBuffers.Get().(*bytes.Buffer)
-		buf.Reset()
-		comp := poolCompressores.Get().(*kgzip.Writer)
-		comp.Reset(buf)
-		comp.Write([]byte(`{"warm":true}`))
-		comp.Close()
-		poolCompressores.Put(comp)
-		poolBuffers.Put(buf)
+func formatNs(ns int64) string {
+	switch {
+	case ns < 1000:
+		return fmt.Sprintf("%d ns", ns)
+	case ns < 1000000:
+		return fmt.Sprintf("%.2f µs", float64(ns)/1000)
+	case ns < 1000000000:
+		return fmt.Sprintf("%.2f ms", float64(ns)/1000000)
+	default:
+		return fmt.Sprintf("%.2f s", float64(ns)/1000000000)
 	}
 }
 
-func healthHandler(resposta http.ResponseWriter, requisicao *http.Request) {
-	inicio := nanotime()
-
-	if requisicao.Method != http.MethodGet {
-		http.Error(resposta, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	resposta.Header().Set("Content-Type", "application/json")
-	resposta.WriteHeader(http.StatusOK)
-	fmt.Fprintf(resposta, `{"status":"ok","t":"%dns"}`, nanotime()-inicio)
+func health(w http.ResponseWriter, r *http.Request) {
+	t := nanotime()
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status":"ok","t":"%s"}`, formatNs(nanotime()-t))
 }
 
-func processHandler(resposta http.ResponseWriter, requisicao *http.Request) {
-	conteudoOriginal, erro := io.ReadAll(requisicao.Body)
-	if erro != nil {
-		http.Error(resposta, "Failed to read body", http.StatusBadRequest)
-		return
-	}
-	requisicao.Body.Close()
-
-	if requisicao.Method != http.MethodPost {
-		http.Error(resposta, "Method not allowed", http.StatusMethodNotAllowed)
+func process(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil || !json.Valid(body) {
+		http.Error(w, "Invalid JSON", 400)
 		return
 	}
 
-	if !json.Valid(conteudoOriginal) {
-		http.Error(resposta, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
+	t := nanotime()
 
-	inicio := nanotime()
+	buf := buffers.Get().(*bytes.Buffer)
+	buf.Reset()
+	gz := compressores.Get().(*kgzip.Writer)
+	gz.Reset(buf)
+	gz.Write(body)
+	gz.Close()
 
-	buffer := poolBuffers.Get().(*bytes.Buffer)
-	buffer.Reset()
+	comp := buf.Len()
+	dur := nanotime() - t
 
-	compressor := poolCompressores.Get().(*kgzip.Writer)
-	compressor.Reset(buffer)
+	compressores.Put(gz)
+	buffers.Put(buf)
 
-	compressor.Write(conteudoOriginal)
-	compressor.Close()
-
-	tamanhoComprimido := buffer.Len()
-	duracao := nanotime() - inicio
-
-	poolCompressores.Put(compressor)
-	poolBuffers.Put(buffer)
-
-	resposta.Header().Set("Content-Type", "application/json")
-	resposta.WriteHeader(http.StatusOK)
-	fmt.Fprintf(resposta,
-		`{"original":%d,"comprimido":%d,"tempo":"%dns"}`,
-		len(conteudoOriginal), tamanhoComprimido, duracao)
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"original":%d,"comprimido":%d,"tempo":"%s"}`, len(body), comp, formatNs(dur))
 }
 
 func main() {
-	inicioStartup := time.Now()
+	t := time.Now()
 
-	preWarm()
+	// Pre-warm: aquece os pools pra primeira request não ser lenta
+	for i := 0; i < 16; i++ {
+		buf := buffers.Get().(*bytes.Buffer)
+		buf.Reset()
+		gz := compressores.Get().(*kgzip.Writer)
+		gz.Reset(buf)
+		gz.Write([]byte(`{}`))
+		gz.Close()
+		compressores.Put(gz)
+		buffers.Put(buf)
+	}
 
-	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/process", processHandler)
-
-	arquivosEstaticos := http.FileServer(http.Dir("static"))
-	http.Handle("/static/", http.StripPrefix("/static/", arquivosEstaticos))
-
-	http.HandleFunc("/", func(resposta http.ResponseWriter, requisicao *http.Request) {
-		if requisicao.URL.Path != "/" {
-			http.NotFound(resposta, requisicao)
+	http.HandleFunc("/health", health)
+	http.HandleFunc("/process", process)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
 			return
 		}
-		http.ServeFile(resposta, requisicao, "static/index.html")
+		http.ServeFile(w, r, "static/index.html")
 	})
 
-	porta := ":8080"
-	log.Printf("Servidor pronto em %s (pools pre-aquecidos)", time.Since(inicioStartup))
-	log.Printf("Rodando em http://localhost%s", porta)
-	if erro := http.ListenAndServe(porta, nil); erro != nil {
-		log.Fatal(erro)
-	}
+	log.Printf("Pronto em %s → http://localhost:8080", time.Since(t))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
