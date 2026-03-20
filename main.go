@@ -26,7 +26,7 @@ func formatNs(ns int64) string {
 	case ns < 1000:
 		return fmt.Sprintf("%d ns", ns)
 	case ns < 1000000:
-		return fmt.Sprintf("%.2f µs", float64(ns)/1000)
+		return fmt.Sprintf("%.2f us", float64(ns)/1000)
 	case ns < 1000000000:
 		return fmt.Sprintf("%.2f ms", float64(ns)/1000000)
 	default:
