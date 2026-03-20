@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webserver Challenge ⚙️</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <span class="logo">⚙️</span>
+            <h1>Webserver Challenge</h1>
+            <p class="subtitle">Go HTTP Server — <span>Otimizado com sync.Pool + klauspost GZIP</span></p>
+        </div>
+
+        <!-- Health Card -->
+        <div class="card">
+            <div class="card-header">
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="path">/health</span>
+                </div>
+                <span class="badge online loading" id="health-badge">verificando...</span>
+            </div>
+
+            <div class="health-grid">
+                <div class="metric">
+                    <div class="metric-label">Status</div>
+                    <div class="metric-value green" id="health-status">—</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Tempo de resposta</div>
+                    <div class="metric-value blue" id="health-time">—</div>
+                </div>
+            </div>
+
+            <div class="result" id="health-result">
+                <div class="result-header">
+                    <span class="result-label">Response</span>
+                    <span class="result-status">200 OK</span>
+                </div>
+                <div class="result-body" id="health-body"></div>
+            </div>
+        </div>
+
+        <!-- Process Card -->
+        <div class="card">
+            <div class="card-header">
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="path">/process</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <textarea id="json-input" spellcheck="false" placeholder='Digite seu JSON aqui...'>{
+  "nome": "João",
+  "msg": "Testando o webserver"
+}</textarea>
+            </div>
+
+            <div class="actions">
+                <button onclick="sendProcess()">Comprimir</button>
+                <button class="secondary" onclick="limpar()">Limpar</button>
+            </div>
+
+            <div class="result" id="process-result">
+                <div class="result-header">
+                    <span class="result-label">Response</span>
+                    <span class="result-status" id="process-status"></span>
+                </div>
+                <div class="result-body" id="process-body"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Feito com Go · stdlib + klauspost/compress · zero frameworks
+        </div>
+    </div>
+
+    <script>
+        async function checkHealth() {
+            const badge = document.getElementById('health-badge');
+            const status = document.getElementById('health-status');
+            const time = document.getElementById('health-time');
+            const result = document.getElementById('health-result');
+            const body = document.getElementById('health-body');
+
+            try {
+                const res = await fetch('/health');
+                const data = await res.json();
+
+                badge.textContent = 'online';
+                badge.className = 'badge online';
+                status.textContent = data.status.toUpperCase();
+                time.textContent = formatTempo(data.t);
+
+                result.style.display = 'block';
+                body.textContent = JSON.stringify(data, null, 2);
+            } catch {
+                badge.textContent = 'offline';
+                badge.className = 'badge offline';
+                status.textContent = 'ERRO';
+                status.style.color = '#ef4444';
+                time.textContent = '—';
+            }
+        }
+
+        async function sendProcess() {
+            const input = document.getElementById('json-input').value;
+            const result = document.getElementById('process-result');
+            const body = document.getElementById('process-body');
+            const statusEl = document.getElementById('process-status');
+
+            try {
+                const res = await fetch('/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: input
+                });
+
+                result.style.display = 'block';
+
+                if (!res.ok) {
+                    statusEl.textContent = res.status + ' ERROR';
+                    statusEl.style.color = '#ef4444';
+                    body.textContent = await res.text();
+                    return;
+                }
+
+                const data = await res.json();
+                statusEl.textContent = '200 OK';
+                statusEl.style.color = '#10b981';
+
+                const ratio = ((1 - data.comprimido / data.original) * 100).toFixed(1);
+                const sign = ratio >= 0 ? '↓' : '↑';
+
+                body.textContent =
+                    `Original:    ${data.original} bytes\n` +
+                    `Comprimido:  ${data.comprimido} bytes\n` +
+                    `Compressão:  ${sign} ${Math.abs(ratio)}%\n` +
+                    `Tempo:       ${formatTempo(data.tempo)}\n\n` +
+                    `Raw: ${JSON.stringify(data)}`;
+            } catch (err) {
+                result.style.display = 'block';
+                statusEl.textContent = 'ERRO';
+                statusEl.style.color = '#ef4444';
+                body.textContent = err.message;
+            }
+        }
+
+        function limpar() {
+            document.getElementById('json-input').value = '';
+            document.getElementById('process-result').style.display = 'none';
+        }
+
+        function formatTempo(raw) {
+            const ns = parseInt(raw);
+            if (isNaN(ns)) return raw;
+            if (ns < 1000) return ns + ' ns';
+            if (ns < 1000000) return (ns / 1000).toFixed(2) + ' µs';
+            if (ns < 1000000000) return (ns / 1000000).toFixed(2) + ' ms';
+            return (ns / 1000000000).toFixed(2) + ' s';
+        }
+
+        checkHealth();
+        setInterval(checkHealth, 10000);
+    </script>
+</body>
+</html>
