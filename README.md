@@ -42,7 +42,7 @@ Recebe um JSON, comprime com GZIP e retorna os tamanhos.
 $ curl -X POST http://localhost:8080/process \
   -H "Content-Type: application/json" \
   -d '{"msg":"hello"}'
-{"original":15,"comprimido":39,"tempo":"3202ns"}
+{"original":15,"comprimido":40,"tempo":"646.24 us"}%                                                                                                                                               
 ```
 
 | Campo | Descrição |
